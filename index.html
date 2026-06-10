@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPARK MTR → Ongoing WMS</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--surface:#1a1d27;--surface2:#22263a;--border:#2e3348;
+  --accent:#4f8ef7;--accent2:#7c5cfc;--success:#36d399;--danger:#f87171;
+  --warning:#f59e0b;--text:#e2e8f0;--muted:#64748b;--radius:10px;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:28px 16px 60px}
+.container{max-width:1100px;margin:0 auto}
+.header{text-align:center;margin-bottom:32px}
+.header h1{font-size:1.85rem;font-weight:700;background:linear-gradient(135deg,#f59e0b,#ef4444);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:5px}
+.header p{color:var(--muted);font-size:.9rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:18px}
+.card-title{display:flex;align-items:center;gap:10px;font-size:.95rem;font-weight:600;margin-bottom:16px}
+.step-num{background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;flex-shrink:0}
+.dz{border:2px dashed var(--border);border-radius:8px;padding:32px;text-align:center;cursor:pointer;transition:all .18s;color:var(--muted);user-select:none}
+.dz:hover,.dz.over{border-color:var(--warning);color:var(--warning);background:rgba(245,158,11,.04)}
+.dz.filled{border-style:solid;border-color:var(--success);color:var(--success)}
+.dz svg{display:block;margin:0 auto 10px}
+.dz .primary{font-size:.92rem;margin-bottom:4px}
+.dz .secondary{font-size:.76rem;color:var(--muted)}
+.meta-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
+.meta-item{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px}
+.meta-label{font-size:.68rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.meta-val{font-size:.88rem;font-weight:500;color:var(--text);word-break:break-word}
+.field-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
+.field-group label{display:block;font-size:.7rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+input[type=text]{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.84rem;padding:7px 10px;outline:none;font-family:inherit;width:100%;transition:border-color .15s}
+input[type=text]:focus{border-color:var(--warning)}
+.tbl-scroll{overflow-x:auto;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th{text-align:left;font-size:.68rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:5px 8px;vertical-align:middle;border-bottom:1px solid rgba(255,255,255,.04)}
+tr:hover td{background:rgba(255,255,255,.02)}
+.date-group-hdr td{background:rgba(245,158,11,.08);color:var(--warning);font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:4px 8px}
+.badge{display:inline-flex;align-items:center;font-size:.64rem;font-weight:600;padding:2px 7px;border-radius:99px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.b-warn{background:rgba(245,158,11,.12);color:var(--warning);border:1px solid rgba(245,158,11,.25)}
+.b-green{background:rgba(54,211,153,.12);color:var(--success);border:1px solid rgba(54,211,153,.25)}
+.btn-generate{background:linear-gradient(135deg,#f59e0b,#ef4444);width:100%;border:none;border-radius:var(--radius);padding:14px;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity .18s;margin-bottom:12px}
+.btn-generate:hover{opacity:.88}
+.btn-generate:disabled{opacity:.3;cursor:not-allowed}
+.err-box{background:rgba(248,113,113,.07);border:1px solid rgba(248,113,113,.25);border-radius:8px;padding:10px 14px;font-size:.82rem;color:#fca5a5;margin-bottom:12px}
+.ok-box{background:rgba(54,211,153,.07);border:1px solid rgba(54,211,153,.25);border-radius:8px;padding:10px 14px;font-size:.82rem;color:#6ee7b7;margin-bottom:12px}
+.warn-box{background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:10px 14px;font-size:.82rem;color:var(--warning);margin-bottom:12px}
+.hint{font-size:.76rem;color:var(--muted);line-height:1.5;margin-top:6px}
+.divider{height:1px;background:var(--border);margin:16px 0}
+.footer{text-align:center;margin-top:24px;font-size:.76rem;color:var(--muted)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:6px}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+code{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:.8em}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>SPARK MTR → Ongoing WMS</h1>
+  <p>Parse a SPARK Material Transfer Request Excel → generate Ongoing WMS outbound order import file.</p>
+</div>
+
+<!-- Step 1: Upload -->
+<div class="card">
+  <div class="card-title"><div class="step-num">1</div> Load MTR Excel</div>
+  <div class="dz" id="dz" onclick="document.getElementById('fi').click()" ondragover="dzOver(event)" ondragleave="dzLeave(event)" ondrop="dzDrop(event)">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+    <div class="primary">Drop SPARK MTR Excel here or click to browse</div>
+    <div class="secondary">File: <em>MTR - Material Transfer Request - pkg_XXXX…</em> (xlsx)</div>
+  </div>
+  <input type="file" id="fi" accept=".xlsx,.xls" style="display:none" onchange="loadFile(this.files[0])">
+  <div id="parse-status" style="margin-top:10px"></div>
+</div>
+
+<!-- Step 2: Preview (hidden until parsed) -->
+<div class="card" id="preview-card" style="display:none">
+  <div class="card-title"><div class="step-num">2</div> Preview & Configure</div>
+
+  <!-- MTR metadata -->
+  <div class="meta-grid" id="meta-grid"></div>
+
+  <!-- Config fields -->
+  <div class="field-grid">
+    <div class="field-group">
+      <label>Order No. Prefix</label>
+      <input type="text" id="cfg-prefix" placeholder="e.g. MTR-2514-2480">
+      <div class="hint">Each delivery date gets: <code>&lt;prefix&gt; DD-MM-YYYY</code></div>
+    </div>
+    <div class="field-group">
+      <label>Customer Code <span style="color:var(--danger)">*</span></label>
+      <input type="text" id="cfg-custcode" placeholder="e.g. SPARK-NEL">
+      <div class="hint">Required — the Ongoing customer number for SPARK.</div>
+    </div>
+    <div class="field-group">
+      <label>Customer Name</label>
+      <input type="text" id="cfg-custname" placeholder="e.g. SPARK NEL">
+    </div>
+  </div>
+
+  <!-- Preview table -->
+  <div id="preview-warn"></div>
+  <div class="tbl-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Article No.</th>
+          <th>Article Name</th>
+          <th>Qty</th>
+          <th>Delivery Location</th>
+          <th>Truck</th>
+          <th>Delivery Date</th>
+          <th>Order No. (generated)</th>
+        </tr>
+      </thead>
+      <tbody id="preview-body"></tbody>
+    </table>
+  </div>
+  <div id="preview-summary" style="margin-top:8px;font-size:.78rem;color:var(--muted)"></div>
+</div>
+
+<!-- Step 3: Generate -->
+<div class="card" id="generate-card" style="display:none">
+  <div class="card-title"><div class="step-num">3</div> Generate Ongoing Order File</div>
+  <button class="btn-generate" id="btn-gen" onclick="generate()">📦 Generate Ongoing WMS Order File</button>
+  <div class="hint" style="text-align:center;margin-bottom:10px">
+    Downloads <code>MTR_&lt;package&gt;_order_import.xlsx</code> — import via <b>Ongoing WMS → Order → Import → Choose File</b>
+  </div>
+  <div id="gen-status"></div>
+</div>
+
+<div class="footer">SPARK MTR Tool · SPARK-NEL (goodsOwnerId 93) · WH: SPARK_NE_Link ThomasTown</div>
+
+</div><!-- .container -->
+
+<script>
+'use strict';
+
+// ── State ────────────────────────────────────────────────────────────────────
+let parsedLines = [];   // [{artNo, artName, qty, loc, truck, dateSerial, dateISO, dateDisp}, ...]
+let mtrMeta = {};       // {package, company, phone, requestDate}
+
+// ── Drag & Drop ──────────────────────────────────────────────────────────────
+function dzOver(e) { e.preventDefault(); document.getElementById('dz').classList.add('over'); }
+function dzLeave(e) { document.getElementById('dz').classList.remove('over'); }
+function dzDrop(e) {
+  e.preventDefault();
+  dzLeave(e);
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+}
+
+// ── File load ────────────────────────────────────────────────────────────────
+function loadFile(file) {
+  if (!file) return;
+  const dz = document.getElementById('dz');
+  dz.classList.remove('over');
+  setStatus('parse-status', '<span class="spin"></span> Parsing…', '');
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
+      parseMTR(wb, file.name);
+      dz.classList.add('filled');
+      dz.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><div class="primary">${esc(file.name)}</div>`;
+    } catch(err) {
+      setStatus('parse-status', `<span style="color:var(--danger)">✗ Parse error: ${esc(err.message)}</span>`, '');
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── Parser ───────────────────────────────────────────────────────────────────
+function parseMTR(wb, filename) {
+  // Find the USER Form sheet
+  const sheetName = wb.SheetNames.find(n => /user\s+form/i.test(n));
+  if (!sheetName) throw new Error('No "USER Form" sheet found. Expected a SPARK MTR Excel file.');
+
+  const ws = wb.Sheets[sheetName];
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+  // Extract metadata — scan first 10 rows for Package, Company, Date
+  mtrMeta = { package: '', company: '', phone: '', requestDate: '' };
+  for (let i = 0; i < Math.min(raw.length, 12); i++) {
+    const r = raw[i];
+    const label = String(r[2] || '').trim().toLowerCase();
+    const val   = String(r[3] || '').trim();
+    if (/^package/i.test(label))           mtrMeta.package     = val;
+    if (/^requester\s+company/i.test(label)) mtrMeta.company   = val;
+    if (/^requester\s+phone/i.test(label))   mtrMeta.phone     = val;
+    if (/^date\s+of\s+request/i.test(label)) mtrMeta.requestDate = val;
+  }
+
+  // Find header row — the row containing "Article Number"
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(raw.length, 20); i++) {
+    if (raw[i].some(c => /^article\s+number$/i.test(String(c).trim()))) {
+      headerIdx = i; break;
+    }
+  }
+  if (headerIdx < 0) throw new Error('Could not find header row with "Article Number" in USER Form sheet.');
+
+  const hdr = raw[headerIdx].map(c => String(c).trim().toLowerCase());
+  const ci = {
+    artName : hdr.findIndex(c => /^article\s+name$/i.test(c)),
+    artNo   : hdr.findIndex(c => /^article\s+number$/i.test(c)),
+    qty     : hdr.findIndex(c => /^qty\s+requested$/i.test(c)),
+    loc     : hdr.findIndex(c => /^delivery\s+location$/i.test(c)),
+    truck   : hdr.findIndex(c => /^truck\s+no/i.test(c)),
+    date    : hdr.findIndex(c => /^delivery\s+date$/i.test(c)),
+  };
+
+  if (ci.artNo < 0 || ci.artName < 0) throw new Error('Could not map Article Number / Article Name columns.');
+
+  // Data rows
+  parsedLines = [];
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const r = raw[i];
+    const artNo   = String(r[ci.artNo]   ?? '').trim();
+    const artName = String(r[ci.artName] ?? '').trim();
+
+    // Skip blank or placeholder rows
+    if (!artNo || artNo === '0' || !artName || artName === '0') continue;
+
+    const qty        = ci.qty  >= 0 ? Number(r[ci.qty])  || 0 : 0;
+    const loc        = ci.loc  >= 0 ? String(r[ci.loc]  ?? '').trim() : '';
+    const truck      = ci.truck >= 0 ? String(r[ci.truck] ?? '').trim() : '';
+    const dateRaw    = ci.date >= 0 ? r[ci.date] : '';
+    const dateSerial = typeof dateRaw === 'number' ? dateRaw : (parseFloat(dateRaw) || 0);
+    const dateISO    = excelDateToISO(dateSerial);
+    const dateDisp   = isoToDisplay(dateISO);
+
+    parsedLines.push({ artNo, artName, qty, loc, truck, dateSerial, dateISO, dateDisp });
+  }
+
+  if (!parsedLines.length) throw new Error('No line items found in USER Form. Check the file has data rows below the Article Number header.');
+
+  // Auto-fill config defaults
+  const pkgShort = packageShort(mtrMeta.package);
+  document.getElementById('cfg-prefix').value   = pkgShort ? 'MTR-' + pkgShort : 'MTR';
+  document.getElementById('cfg-custname').value  = 'SPARK NEL';
+  document.getElementById('cfg-custcode').value  = '';
+
+  // Warn if any delivery dates are in the past
+  const today = new Date().toISOString().slice(0, 10);
+  const pastDates = [...new Set(parsedLines.filter(l => l.dateISO && l.dateISO < today).map(l => l.dateDisp))];
+
+  // Render
+  renderMeta();
+  renderPreview();
+  document.getElementById('preview-card').style.display  = '';
+  document.getElementById('generate-card').style.display = '';
+
+  let warnHtml = '';
+  if (pastDates.length) {
+    warnHtml = `<div class="warn-box" style="margin-top:10px">⚠ ${pastDates.length} delivery date(s) are in the past: <b>${pastDates.join(', ')}</b>. Verify the dates are correct before importing — Ongoing may reject past-dated orders.</div>`;
+  }
+  setStatus('parse-status', `<span style="color:var(--success)">✓ Parsed ${parsedLines.length} line(s) from <b>${esc(sheetName)}</b></span>${warnHtml}`, '');
+}
+
+// ── Render metadata ──────────────────────────────────────────────────────────
+function renderMeta() {
+  const dates = [...new Set(parsedLines.map(l => l.dateISO).filter(Boolean))].sort();
+  const dateRange = dates.length === 1 ? isoToDisplay(dates[0])
+    : dates.length > 1 ? `${isoToDisplay(dates[0])} – ${isoToDisplay(dates[dates.length-1])}`
+    : '(no dates)';
+
+  document.getElementById('meta-grid').innerHTML = [
+    ['Package', mtrMeta.package || '—'],
+    ['Requester Company', mtrMeta.company || '—'],
+    ['Date of Request', mtrMeta.requestDate || '—'],
+    ['Delivery Date(s)', dateRange],
+    ['Line Items', parsedLines.length + ' lines'],
+    ['Delivery Groups', dates.length + ' date(s)'],
+  ].map(([label, val]) => `
+    <div class="meta-item">
+      <div class="meta-label">${label}</div>
+      <div class="meta-val">${esc(val)}</div>
+    </div>`).join('');
+}
+
+// ── Render preview table ─────────────────────────────────────────────────────
+function renderPreview() {
+  const prefix = document.getElementById('cfg-prefix').value.trim() || 'MTR';
+  const tbody  = document.getElementById('preview-body');
+
+  // Group by date
+  const groups = groupByDate(parsedLines);
+  let html = '';
+  let rowNum = 1;
+
+  for (const [dateISO, lines] of Object.entries(groups)) {
+    const orderNo = orderNoFor(prefix, dateISO);
+    html += `<tr class="date-group-hdr"><td colspan="8">${esc(orderNo)} — ${esc(isoToDisplay(dateISO))} (${lines.length} line${lines.length>1?'s':''})</td></tr>`;
+    for (const l of lines) {
+      html += `<tr>
+        <td style="color:var(--muted)">${rowNum++}</td>
+        <td><code>${esc(l.artNo)}</code></td>
+        <td>${esc(l.artName)}</td>
+        <td style="font-weight:600">${l.qty}</td>
+        <td>${esc(l.loc)}</td>
+        <td>${esc(l.truck)}</td>
+        <td style="white-space:nowrap">${esc(l.dateDisp)}</td>
+        <td style="color:var(--muted);font-size:.78rem">${esc(orderNo)}</td>
+      </tr>`;
+    }
+  }
+
+  tbody.innerHTML = html;
+
+  const totalQty = parsedLines.reduce((s, l) => s + l.qty, 0);
+  const dateCount = Object.keys(groups).length;
+  document.getElementById('preview-summary').textContent =
+    `${parsedLines.length} lines · ${totalQty} total items · ${dateCount} delivery date${dateCount>1?'s':''} → ${dateCount} order${dateCount>1?'s':''} in one import file`;
+}
+
+// Re-render on prefix change
+document.getElementById('cfg-prefix').addEventListener('input', renderPreview);
+
+// ── Generate ─────────────────────────────────────────────────────────────────
+function generate() {
+  const custCode  = document.getElementById('cfg-custcode').value.trim();
+  const custName  = document.getElementById('cfg-custname').value.trim();
+  const prefix    = document.getElementById('cfg-prefix').value.trim() || 'MTR';
+
+  if (!custCode) {
+    setStatus('gen-status', '<span style="color:var(--danger)">✗ Customer Code is required. Enter the Ongoing customer number for SPARK-NEL before generating.</span>', '');
+    document.getElementById('cfg-custcode').focus();
+    return;
+  }
+  if (!parsedLines.length) {
+    setStatus('gen-status', '<span style="color:var(--danger)">✗ No lines to export. Load a MTR file first.</span>', '');
+    return;
+  }
+
+  const hdrs = [
+    'CustomerNumber','DeliveryDate','Reference','TranporterOrderNumber','OrderNo',
+    'ArticleNumber','ArticleName','OrderRowBatchNo','NumberOfItems','OrderComment',
+    'OrderRowComment','SalesCode','OrderDeliveryInstruction','CustomerOrderNumber','WayOfDelivery',
+    'Transporter.TransporterCode','Transporter.TransporterServiceCode','Transporter.TransporterCustomerNumber',
+    'Customer.Name','Customer.Address','Customer.Address2','Customer.Address3','Customer.PostCode',
+    'Customer.City','Customer.TelePhone','Customer.Remark','Customer.Email','Customer.MobilePhone',
+    'Customer.CountryCode','Customer.CountryName','Customer.CountryStateCode','Customer.DeliveryInstruction',
+    'Customer.NotifyBySMS','Customer.NotifyByEmail','Customer.NotifyByTelephone'
+  ];
+
+  const groups = groupByDate(parsedLines);
+  const data   = [];
+
+  for (const [dateISO, lines] of Object.entries(groups)) {
+    const orderNo = orderNoFor(prefix, dateISO);
+    const comment = [
+      prefix, mtrMeta.requestDate ? 'Requested ' + mtrMeta.requestDate : '',
+      mtrMeta.package, 'Delivery ' + isoToDisplay(dateISO)
+    ].filter(Boolean).join(' · ');
+
+    lines.forEach((l, idx) => {
+      const row = new Array(hdrs.length).fill('');
+      row[0]  = custCode;                      // CustomerNumber
+      row[1]  = dateISO;                       // DeliveryDate
+      row[4]  = orderNo;                       // OrderNo
+      row[5]  = l.artNo;                       // ArticleNumber
+      row[6]  = l.artName;                     // ArticleName
+      row[8]  = l.qty;                         // NumberOfItems
+      row[9]  = idx === 0 ? comment : '';      // OrderComment (first row per order)
+      row[10] = [l.loc, l.truck].filter(Boolean).join(' | '); // OrderRowComment
+      row[14] = 'delivery';                    // WayOfDelivery
+      row[18] = idx === 0 ? custName : '';     // Customer.Name
+      data.push(row);
+    });
+  }
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([hdrs, ...data]);
+  XLSX.utils.book_append_sheet(wb, ws, 'Data');
+
+  // Filename: MTR_<pkgshort>_order_import.xlsx
+  const pkgShort = packageShort(mtrMeta.package) || prefix.replace(/^MTR-?/i,'') || 'export';
+  const fname    = `MTR_${pkgShort.replace(/[^A-Za-z0-9_-]/g,'_')}_order_import.xlsx`;
+  XLSX.writeFile(wb, fname);
+
+  const totalQty  = parsedLines.reduce((s, l) => s + l.qty, 0);
+  const dateCount = Object.keys(groups).length;
+  setStatus('gen-status', `
+    <div class="ok-box">
+      ✓ Generated <b>${esc(fname)}</b> — ${data.length} row(s), ${totalQty} total items, ${dateCount} order${dateCount>1?'s':''}.<br>
+      Import via <b>Ongoing WMS → Order → Import → Choose File</b><br>
+      <span style="color:var(--muted)">Goods owner: SPARK - NEL (ID 93) · Warehouse: SPARK_NE_Link ThomasTown (WH 46)</span>
+    </div>`, '');
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function excelDateToISO(serial) {
+  if (!serial || isNaN(serial)) return '';
+  // Excel serial → JS date (Dec 30 1899 epoch, accounts for Excel 1900 leap-year bug)
+  const d = new Date(Math.round((serial - 25569) * 86400000));
+  return d.toISOString().slice(0, 10);
+}
+
+function isoToDisplay(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function groupByDate(lines) {
+  // Groups lines by dateISO, preserving insertion order; dates sorted ascending
+  const map = {};
+  for (const l of lines) {
+    const key = l.dateISO || '(no date)';
+    (map[key] = map[key] || []).push(l);
+  }
+  // Sort by date key
+  return Object.fromEntries(Object.entries(map).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function orderNoFor(prefix, dateISO) {
+  if (!dateISO || dateISO === '(no date)') return prefix;
+  const [y, m, d] = dateISO.split('-');
+  return `${prefix} ${d}-${m}-${y}`;
+}
+
+function packageShort(pkg) {
+  if (!pkg) return '';
+  // "S-MEI-2514 & 2480 / MAXIM / CULVERT" → "S-MEI-2514-2480"
+  // Take everything up to the first slash (or whole string), clean special chars
+  let s = pkg.split('/')[0].trim();
+  s = s.replace(/\s*&\s*/g, '-').replace(/\s+/g, '-').replace(/[^A-Za-z0-9_-]/g, '');
+  return s.replace(/-+$/, '');
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function setStatus(id, html) {
+  document.getElementById(id).innerHTML = html;
+}
+</script>
+</body>
+</html>
