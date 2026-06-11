@@ -33,8 +33,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .meta-val{font-size:.88rem;font-weight:500;color:var(--text);word-break:break-word}
 .field-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
 .field-group label{display:block;font-size:.7rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
-input[type=text]{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.84rem;padding:7px 10px;outline:none;font-family:inherit;width:100%;transition:border-color .15s}
-input[type=text]:focus{border-color:var(--warning)}
+input[type=text],input[type=password]{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.84rem;padding:7px 10px;outline:none;font-family:inherit;width:100%;transition:border-color .15s}
+input[type=text]:focus,input[type=password]:focus{border-color:var(--warning)}
 .tbl-scroll{overflow-x:auto;margin-bottom:10px}
 table{width:100%;border-collapse:collapse;font-size:.82rem}
 th{text-align:left;font-size:.68rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -71,6 +71,28 @@ td.num .ec{font-weight:600}
 .btn-add-row:hover{background:rgba(79,142,247,.2)}
 .btn-del{background:none;border:none;cursor:pointer;color:var(--muted);padding:2px 5px;border-radius:3px;font-size:.85em;line-height:1;transition:color .15s}
 .btn-del:hover{color:var(--danger)}
+
+/* Ongoing WMS submit button */
+.btn-ongoing{background:var(--surface2);border:1px solid rgba(79,142,247,.35);width:100%;border-radius:var(--radius);padding:12px;color:#93c5fd;font-size:.92rem;font-weight:600;cursor:pointer;font-family:inherit;transition:all .18s;margin-bottom:12px}
+.btn-ongoing:hover{background:rgba(79,142,247,.12);border-color:rgba(79,142,247,.6)}
+
+/* Modal */
+.modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:1000;align-items:center;justify-content:center}
+.modal-ov.open{display:flex}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px;max-width:580px;width:calc(100% - 32px);max-height:88vh;overflow-y:auto}
+.modal-title{font-size:1rem;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.modal-actions{display:flex;gap:10px;margin-top:18px}
+.btn-modal-cancel{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:.88rem;font-weight:600;cursor:pointer;font-family:inherit;transition:border-color .15s}
+.btn-modal-cancel:hover{border-color:var(--muted)}
+.btn-modal-ok{flex:2;background:linear-gradient(135deg,#f59e0b,#ef4444);border:none;border-radius:8px;padding:10px;color:#fff;font-size:.88rem;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity .15s}
+.btn-modal-ok:hover{opacity:.88}
+.btn-modal-ok:disabled{opacity:.3;cursor:not-allowed}
+.sum-tbl{width:100%;border-collapse:collapse;font-size:.82rem;margin:10px 0}
+.sum-tbl th{text-align:left;color:var(--muted);font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;padding:4px 8px;border-bottom:1px solid var(--border)}
+.sum-tbl td{padding:5px 8px;border-bottom:1px solid rgba(255,255,255,.04)}
+.cred-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.r-ok{color:var(--success)}
+.r-err{color:var(--danger)}
 </style>
 </head>
 <body>
@@ -149,9 +171,14 @@ td.num .ec{font-weight:600}
 <!-- Step 3: Generate -->
 <div class="card" id="generate-card" style="display:none">
   <div class="card-title"><div class="step-num">3</div> Generate Ongoing Order File</div>
-  <button class="btn-generate" id="btn-gen" onclick="generate()">📦 Generate Ongoing WMS Order File</button>
-  <div class="hint" style="text-align:center;margin-bottom:10px">
+  <button class="btn-generate" id="btn-gen" onclick="generate()">📦 Download Ongoing WMS Import File</button>
+  <div class="hint" style="text-align:center;margin-bottom:12px">
     Downloads <code>MTR_&lt;package&gt;_order_import.xlsx</code> — import via <b>Ongoing WMS → Order → Import → Choose File</b>
+  </div>
+  <div style="text-align:center;color:var(--muted);font-size:.74rem;margin-bottom:10px;letter-spacing:.04em;text-transform:uppercase">— or —</div>
+  <button class="btn-ongoing" id="btn-ongoing" onclick="submitToOngoing()">🔗 Add Directly to Ongoing WMS</button>
+  <div class="hint" style="text-align:center;margin-bottom:10px">
+    Creates outbound orders directly via the Ongoing API — requires API credentials.
   </div>
   <div id="gen-status"></div>
 </div>
@@ -159,6 +186,21 @@ td.num .ec{font-weight:600}
 <div class="footer">SPARK MTR Tool · SPARK-NEL (goodsOwnerId 93) · WH: SPARK_NE_Link ThomasTown</div>
 
 </div><!-- .container -->
+
+<!-- Ongoing WMS confirmation modal -->
+<div class="modal-ov" id="ongoing-modal">
+  <div class="modal-box">
+    <div class="modal-title">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      Confirm: Submit to Ongoing WMS
+    </div>
+    <div id="modal-body"></div>
+    <div class="modal-actions" id="modal-actions">
+      <button class="btn-modal-cancel" onclick="closeOngoingModal()">Cancel</button>
+      <button class="btn-modal-ok" id="btn-modal-ok" onclick="confirmOngoing()">Submit to Ongoing WMS</button>
+    </div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -262,7 +304,6 @@ function markDzFilled(name) {
 
 // ── PDF content parser ───────────────────────────────────────────────────────────────────────────
 function parsePDFContent(items, filename) {
-  // Group text items into visual rows by Y coordinate (±10px = same row)
   items.sort((a, b) => a.page !== b.page ? a.page - b.page : a.y - b.y);
 
   const ROW_TOL = 10;
@@ -279,7 +320,6 @@ function parsePDFContent(items, filename) {
   }
   for (const row of rows) row.sort((a, b) => a.x - b.x);
 
-  // Build a debug snippet (first 40 rows, ≤8 items each) shown on failure
   function debugSnippet() {
     const lines = rows.slice(0, 40).map((r, i) =>
       `[${i}] ` + r.map(it => `"${it.text}"@(${Math.round(it.x)},${Math.round(it.y)})`).slice(0, 8).join('  ')
@@ -287,8 +327,6 @@ function parsePDFContent(items, filename) {
     return '\n\nFirst rows extracted from PDF:\n' + lines.join('\n');
   }
 
-  // Find the header row — look for "Article Number/No" anywhere in a row's joined text
-  // OR look for a row where a cell starts with "Article" and a nearby cell has "Number/No"
   let hdrIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     const joined = rows[i].map(it => it.text).join(' ');
@@ -298,7 +336,6 @@ function parsePDFContent(items, filename) {
       hdrIdx = i; break;
     }
   }
-  // Fallback: look for a row containing standalone "Article" that precedes a row with column labels
   if (hdrIdx < 0) {
     for (let i = 0; i < rows.length; i++) {
       const joined = rows[i].map(it => it.text).join(' ');
@@ -310,7 +347,6 @@ function parsePDFContent(items, filename) {
     debugSnippet()
   );
 
-  // Extract metadata from rows before the header
   mtrMeta = { package: '', company: '', phone: '', requestDate: '' };
   for (let i = 0; i < hdrIdx; i++) {
     for (let j = 0; j < rows[i].length; j++) {
@@ -331,7 +367,6 @@ function parsePDFContent(items, filename) {
     }
   }
 
-  // Map column X positions — scan header row + next row (two-row headers)
   const COL_TOL = 60;
   const colX    = {};
 
@@ -360,7 +395,6 @@ function parsePDFContent(items, filename) {
   if (colX.artNo === undefined && colX.artName === undefined)
     throw new Error('Found the header row but could not identify Article Number or Article Name columns.' + debugSnippet());
 
-  // Parse data rows below header
   parsedLines = [];
 
   for (let i = hdrIdx + 1; i < rows.length; i++) {
@@ -377,7 +411,6 @@ function parsePDFContent(items, filename) {
 
     const artNo   = (fields.artNo   || '').trim();
     const artName = (fields.artName || '').trim();
-    // Skip blank rows, pure-numeric rows that look like row numbers, and header repeats
     if (!artNo && !artName) continue;
     if (/^(\d{1,3}|no\.?|article|item|part)$/i.test(artNo) && !artName) continue;
 
@@ -529,7 +562,6 @@ function renderPreview() {
   updateSummary();
 }
 
-// Update only order-number cells when prefix changes (preserves any edits)
 function updateOrderNumbers() {
   const prefix   = document.getElementById('cfg-prefix').value.trim() || 'MTR';
   const dataRows = document.querySelectorAll('#preview-body tr[data-row]');
@@ -558,7 +590,6 @@ document.getElementById('cfg-prefix').addEventListener('input', () => {
   }
 });
 
-// ── Add / delete rows ─────────────────────────────────────────────────────────────────────────────
 function addRow() {
   const tbody = document.getElementById('preview-body');
   const tr    = document.createElement('tr');
@@ -598,7 +629,6 @@ function updateSummary() {
     `${n} line${n!==1?'s':''} · ${total} total items · ${dates.size} delivery date${dates.size!==1?'s':''} → ${dates.size} order${dates.size!==1?'s':''} in one import file`;
 }
 
-// ── Read current table state for generate() ──────────────────────────────────────────────────────────────────
 function getRowsFromTable() {
   const rows = document.querySelectorAll('#preview-body tr[data-row]');
   return Array.from(rows).map(tr => {
@@ -617,7 +647,7 @@ function getRowsFromTable() {
   }).filter(r => r.artNo || r.artName);
 }
 
-// ── Generate ──────────────────────────────────────────────────────────────────────────────────────
+// ── Generate (Excel download) ────────────────────────────────────────────────────────────────────────────────
 function generate() {
   const custCode = document.getElementById('cfg-custcode').value.trim();
   const custName = document.getElementById('cfg-custname').value.trim();
@@ -717,16 +747,13 @@ function displayToISO(disp) {
 
 function parseDateStr(str) {
   if (!str) return '';
-  // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
   const m1 = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
   if (m1) {
     const [, d, mo, y] = m1;
     const year = y.length === 2 ? '20' + y : y;
     return `${year}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
   }
-  // Already ISO
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-  // Excel serial
   const serial = parseFloat(str);
   if (serial > 40000 && serial < 60000) return excelDateToISO(serial);
   return '';
@@ -761,6 +788,175 @@ function esc(s) {
 function setStatus(id, html) {
   document.getElementById(id).innerHTML = html;
 }
+
+// ── Ongoing WMS direct submit ──────────────────────────────────────────────────────────────────────────
+function submitToOngoing() {
+  const custCode = document.getElementById('cfg-custcode').value.trim();
+  if (!custCode) {
+    setStatus('gen-status', '<span style="color:var(--danger)">✗ Customer Code is required before submitting to Ongoing.</span>');
+    document.getElementById('cfg-custcode').focus();
+    return;
+  }
+  const lines = getRowsFromTable();
+  if (!lines.length) {
+    setStatus('gen-status', '<span style="color:var(--danger)">✗ No lines to submit. Load a MTR file first.</span>');
+    return;
+  }
+
+  const prefix  = document.getElementById('cfg-prefix').value.trim() || 'MTR';
+  const groups  = groupByDate(lines);
+  const savedU  = localStorage.getItem('ongoing_user') || 'Tnix';
+  const savedP  = localStorage.getItem('ongoing_pass') || '';
+
+  const orderRows = Object.entries(groups).map(([dateISO, grpLines]) => {
+    const orderNo  = orderNoFor(prefix, dateISO);
+    const totalQty = grpLines.reduce((s, l) => s + l.qty, 0);
+    return `<tr>
+      <td>${esc(orderNo)}</td>
+      <td style="white-space:nowrap">${esc(isoToDisplay(dateISO) || dateISO)}</td>
+      <td>${grpLines.length}</td>
+      <td>${totalQty}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('modal-body').innerHTML = `
+    <div class="warn-box" style="margin-bottom:14px">
+      ⚠ This will create <b>real outbound orders</b> in Ongoing WMS (production).<br>
+      Goods owner: <b>SPARK-NEL (ID 93)</b> · Warehouse: <b>SPARK_NE_Link ThomasTown (WH 46)</b><br>
+      Orders must be cancelled manually in Ongoing if submitted in error.
+    </div>
+    <table class="sum-tbl">
+      <thead><tr><th>Order Number</th><th>Delivery Date</th><th>Lines</th><th>Total Qty</th></tr></thead>
+      <tbody>${orderRows}</tbody>
+    </table>
+    <div style="margin-top:14px;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Ongoing API Credentials</div>
+    <div class="cred-row">
+      <div class="field-group"><label>Username</label><input type="text" id="ong-user" value="${esc(savedU)}" autocomplete="off" spellcheck="false"></div>
+      <div class="field-group"><label>Password</label><input type="password" id="ong-pass" value="${esc(savedP)}" autocomplete="off"></div>
+    </div>
+    <div class="hint">Credentials saved in browser localStorage. Sent only to <code>api.ongoingsystems.se</code>.</div>
+    <div id="modal-prog" style="margin-top:12px"></div>`;
+
+  document.getElementById('btn-modal-ok').disabled = false;
+  document.getElementById('btn-modal-ok').textContent = 'Submit to Ongoing WMS';
+  document.getElementById('modal-actions').style.display = 'flex';
+  document.getElementById('ongoing-modal').classList.add('open');
+}
+
+function closeOngoingModal() {
+  document.getElementById('ongoing-modal').classList.remove('open');
+}
+
+async function confirmOngoing() {
+  const user = document.getElementById('ong-user').value.trim();
+  const pass = document.getElementById('ong-pass').value;
+  const prog = document.getElementById('modal-prog');
+
+  if (!user || !pass) {
+    prog.innerHTML = '<span style="color:var(--danger)">Enter API credentials before submitting.</span>';
+    return;
+  }
+
+  localStorage.setItem('ongoing_user', user);
+  localStorage.setItem('ongoing_pass', pass);
+
+  document.getElementById('btn-modal-ok').disabled = true;
+  document.getElementById('modal-actions').querySelector('.btn-modal-cancel').disabled = true;
+
+  const prefix   = document.getElementById('cfg-prefix').value.trim() || 'MTR';
+  const custCode = document.getElementById('cfg-custcode').value.trim();
+  const custName = document.getElementById('cfg-custname').value.trim();
+  const lines    = getRowsFromTable();
+  const groups   = groupByDate(lines);
+  const authHdr  = 'Basic ' + btoa(unescape(encodeURIComponent(user + ':' + pass)));
+  const endpoint = 'https://api.ongoingsystems.se/BWSBNE/api/v1/orders';
+
+  const results = [];
+  const entries = Object.entries(groups);
+
+  for (let i = 0; i < entries.length; i++) {
+    const [dateISO, grpLines] = entries[i];
+    const orderNo = orderNoFor(prefix, dateISO);
+    const comment = [
+      prefix,
+      mtrMeta.requestDate ? 'Requested ' + mtrMeta.requestDate : '',
+      mtrMeta.package,
+      'Delivery ' + (isoToDisplay(dateISO) || dateISO)
+    ].filter(Boolean).join(' · ');
+
+    prog.innerHTML = `<span class="spin"></span> Submitting ${i + 1}/${entries.length}: <b>${esc(orderNo)}</b>…`;
+
+    const body = {
+      goodsOwnerId: 93,
+      orderNumber:  orderNo,
+      deliveryDate: dateISO + 'T00:00:00',
+      orderComment: comment,
+      wayOfDelivery: { wayOfDeliveryCode: 'delivery' },
+      consignee: { customerCode: custCode, name: custName },
+      orderLines: grpLines.map((l, ri) => ({
+        rowNumber:     ri + 1,
+        article:       { articleNumber: l.artNo, articleName: l.artName },
+        numberOfItems: l.qty,
+        rowComment:    [l.loc, l.truck].filter(Boolean).join(' | ')
+      }))
+    };
+
+    try {
+      const resp = await fetch(endpoint, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': authHdr },
+        body:    JSON.stringify(body)
+      });
+      if (resp.ok) {
+        const json = await resp.json().catch(() => ({}));
+        results.push({ orderNo, ok: true, detail: json.orderId ? 'Ongoing ID: ' + json.orderId : 'Accepted' });
+      } else {
+        const txt = await resp.text().catch(() => '');
+        results.push({ orderNo, ok: false, detail: `HTTP ${resp.status} — ${txt.substring(0, 140)}` });
+      }
+    } catch (err) {
+      const cors = err instanceof TypeError;
+      results.push({ orderNo, ok: false, cors,
+        detail: cors
+          ? 'Network/CORS error — the Ongoing API may not allow direct browser requests. Use the Excel download and import manually.'
+          : err.message });
+    }
+  }
+
+  const rows = results.map(r => `<tr class="${r.ok ? 'r-ok' : 'r-err'}">
+    <td>${r.ok ? '✓' : '✗'}</td>
+    <td style="white-space:nowrap">${esc(r.orderNo)}</td>
+    <td style="font-size:.76rem">${esc(r.detail)}</td>
+  </tr>`).join('');
+
+  prog.innerHTML = `<table class="sum-tbl" style="margin-top:0">
+    <thead><tr><th></th><th>Order</th><th>Result</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+
+  const allOk  = results.every(r => r.ok);
+  const anyOk  = results.some(r => r.ok);
+  const hasCors = results.some(r => r.cors);
+
+  document.getElementById('modal-actions').innerHTML = `
+    <button class="btn-modal-cancel" onclick="closeOngoingModal()">Close</button>
+    ${hasCors || !allOk ? `<button class="btn-modal-ok" onclick="generate();closeOngoingModal()">Download Excel Instead</button>` : ''}`;
+
+  if (allOk) {
+    setStatus('gen-status', `<div class="ok-box">✓ ${results.length} order(s) submitted to Ongoing WMS (SPARK-NEL, ID 93).</div>`);
+  } else if (anyOk) {
+    setStatus('gen-status', `<div class="warn-box">⚠ ${results.filter(r=>r.ok).length}/${results.length} orders submitted — see modal for details.</div>`);
+  } else if (hasCors) {
+    setStatus('gen-status', `<div class="err-box">✗ API blocked by browser (CORS). Use the Excel download and import manually via Ongoing WMS → Order → Import.</div>`);
+  } else {
+    setStatus('gen-status', `<div class="err-box">✗ All ${results.length} submissions failed — check credentials and try again.</div>`);
+  }
+}
+
+// Close modal on overlay click
+document.getElementById('ongoing-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeOngoingModal();
+});
 </script>
 </body>
 </html>
