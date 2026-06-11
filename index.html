@@ -95,7 +95,7 @@ td.num .ec{font-weight:600}
 
 <!-- Step 2: Preview (hidden until parsed) -->
 <div class="card" id="preview-card" style="display:none">
-  <div class="card-title"><div class="step-num">2</div> Preview & Configure</div>
+  <div class="card-title"><div class="step-num">2</div> Preview &amp; Configure</div>
 
   <!-- MTR metadata -->
   <div class="meta-grid" id="meta-grid"></div>
@@ -169,11 +169,11 @@ if (typeof pdfjsLib !== 'undefined') {
     'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 }
 
-// ── State ────────────────────────────────────────────────────────────────────
+// ── State ──────────────────────────────────────────────────────────────────────────────
 let parsedLines = [];   // [{artNo, artName, qty, loc, truck, dateISO, dateDisp}, ...]
 let mtrMeta = {};       // {package, company, phone, requestDate}
 
-// ── Drag & Drop ──────────────────────────────────────────────────────────────
+// ── Drag & Drop ──────────────────────────────────────────────────────────────────────────
 function dzOver(e) { e.preventDefault(); document.getElementById('dz').classList.add('over'); }
 function dzLeave(e) { document.getElementById('dz').classList.remove('over'); }
 function dzDrop(e) {
@@ -183,7 +183,7 @@ function dzDrop(e) {
   if (f) loadFile(f);
 }
 
-// ── File load dispatcher ─────────────────────────────────────────────────────
+// ── File load dispatcher ───────────────────────────────────────────────────────────────────────
 function loadFile(file) {
   if (!file) return;
   document.getElementById('dz').classList.remove('over');
@@ -195,7 +195,7 @@ function loadFile(file) {
   }
 }
 
-// ── Excel loader ─────────────────────────────────────────────────────────────
+// ── Excel loader ─────────────────────────────────────────────────────────────────────────────
 function loadExcelFile(file) {
   setStatus('parse-status', '<span class="spin"></span> Parsing Excel…');
   const reader = new FileReader();
@@ -212,7 +212,7 @@ function loadExcelFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
-// ── PDF loader ───────────────────────────────────────────────────────────────
+// ── PDF loader ─────────────────────────────────────────────────────────────────────────────
 async function loadPDFFile(file) {
   if (typeof pdfjsLib === 'undefined') {
     setStatus('parse-status', `<span style="color:var(--danger)">✗ PDF.js failed to load. Check your internet connection and reload the page.</span>`);
@@ -246,7 +246,10 @@ async function loadPDFFile(file) {
     parsePDFContent(allItems, file.name);
     markDzFilled(file.name);
   } catch(err) {
-    setStatus('parse-status', `<span style="color:var(--danger)">✗ PDF error: ${esc(err.message)}</span>`);
+    const parts = err.message.split('\n\nFirst rows extracted from PDF:\n');
+    const main  = esc(parts[0]);
+    const diag  = parts[1] ? `<pre style="margin-top:8px;font-size:.72rem;color:var(--muted);white-space:pre-wrap;max-height:200px;overflow:auto;background:var(--surface2);border-radius:6px;padding:8px">${esc(parts[1])}</pre>` : '';
+    setStatus('parse-status', `<span style="color:var(--danger)">✗ PDF error: ${main}</span>${diag}`);
     console.error(err);
   }
 }
@@ -257,12 +260,12 @@ function markDzFilled(name) {
   dz.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><div class="primary">${esc(name)}</div>`;
 }
 
-// ── PDF content parser ───────────────────────────────────────────────────────
+// ── PDF content parser ───────────────────────────────────────────────────────────────────────────
 function parsePDFContent(items, filename) {
-  // Group text items into visual rows by Y coordinate (±5px = same row)
+  // Group text items into visual rows by Y coordinate (±10px = same row)
   items.sort((a, b) => a.page !== b.page ? a.page - b.page : a.y - b.y);
 
-  const ROW_TOL = 5;
+  const ROW_TOL = 10;
   const rows = [];
   let lastY = -9999, lastPage = -1;
 
@@ -276,13 +279,36 @@ function parsePDFContent(items, filename) {
   }
   for (const row of rows) row.sort((a, b) => a.x - b.x);
 
-  // Find the header row containing "Article Number" or "Article No"
+  // Build a debug snippet (first 40 rows, ≤8 items each) shown on failure
+  function debugSnippet() {
+    const lines = rows.slice(0, 40).map((r, i) =>
+      `[${i}] ` + r.map(it => `"${it.text}"@(${Math.round(it.x)},${Math.round(it.y)})`).slice(0, 8).join('  ')
+    );
+    return '\n\nFirst rows extracted from PDF:\n' + lines.join('\n');
+  }
+
+  // Find the header row — look for "Article Number/No" anywhere in a row's joined text
+  // OR look for a row where a cell starts with "Article" and a nearby cell has "Number/No"
   let hdrIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     const joined = rows[i].map(it => it.text).join(' ');
-    if (/article\s*(number|no\.?)/i.test(joined)) { hdrIdx = i; break; }
+    if (/article\s*(number|no\.?)/i.test(joined) ||
+        /part\s*(number|no\.?)/i.test(joined) ||
+        /item\s*(number|no\.?)/i.test(joined)) {
+      hdrIdx = i; break;
+    }
   }
-  if (hdrIdx < 0) throw new Error('Could not find "Article Number" header row in PDF. Is this a SPARK MTR?');
+  // Fallback: look for a row containing standalone "Article" that precedes a row with column labels
+  if (hdrIdx < 0) {
+    for (let i = 0; i < rows.length; i++) {
+      const joined = rows[i].map(it => it.text).join(' ');
+      if (/\bArticle\b/i.test(joined) && /\bName\b/i.test(joined)) { hdrIdx = i; break; }
+    }
+  }
+  if (hdrIdx < 0) throw new Error(
+    'Could not find the column header row in this PDF. Expected a row containing "Article Number".' +
+    debugSnippet()
+  );
 
   // Extract metadata from rows before the header
   mtrMeta = { package: '', company: '', phone: '', requestDate: '' };
@@ -290,7 +316,6 @@ function parsePDFContent(items, filename) {
     for (let j = 0; j < rows[i].length; j++) {
       const t    = rows[i][j].text;
       const next = rows[i][j + 1] ? rows[i][j + 1].text.trim() : '';
-      // "Label: Value" in single text item
       const colon = t.indexOf(':');
       if (colon > 0) {
         const lbl = t.slice(0, colon).trim();
@@ -299,7 +324,6 @@ function parsePDFContent(items, filename) {
         if (/requester.*company/i.test(lbl) && val)   mtrMeta.company     = val;
         if (/date.*request/i.test(lbl) && val)        mtrMeta.requestDate = val;
       } else {
-        // Label in one cell, value in adjacent cell
         if (/^package$/i.test(t) && next)             mtrMeta.package     = next;
         if (/requester.*company/i.test(t) && next)    mtrMeta.company     = next;
         if (/date.*request/i.test(t) && next)         mtrMeta.requestDate = next;
@@ -307,9 +331,8 @@ function parsePDFContent(items, filename) {
     }
   }
 
-  // Map column X positions from the header row
-  // Also scan the next row in case it's a two-row header
-  const COL_TOL = 40;
+  // Map column X positions — scan header row + next row (two-row headers)
+  const COL_TOL = 60;
   const colX    = {};
 
   function scanHdrRow(row) {
@@ -317,22 +340,27 @@ function parsePDFContent(items, filename) {
       const t  = row[j].text;
       const t2 = j + 1 < row.length ? t + ' ' + row[j + 1].text : t;
       const x  = row[j].x;
-      if (/article\s*name/i.test(t) || /article\s*name/i.test(t2))           colX.artName = colX.artName ?? x;
-      if (/article\s*(number|no\.?)/i.test(t) || /article\s*(number|no\.?)/i.test(t2)) colX.artNo = colX.artNo ?? x;
-      if (/^qty/i.test(t) || /quantity/i.test(t))                            colX.qty     = colX.qty     ?? x;
-      if (/delivery\s*location/i.test(t) || /delivery\s*location/i.test(t2)) colX.loc     = colX.loc     ?? x;
-      if (/truck/i.test(t))                                                   colX.truck   = colX.truck   ?? x;
-      if (/delivery\s*date/i.test(t) || /delivery\s*date/i.test(t2))         colX.date    = colX.date    ?? x;
+      if (/article\s*(name|desc)/i.test(t) || /article\s*(name|desc)/i.test(t2) ||
+          /item\s*(name|desc)/i.test(t) || /item\s*(name|desc)/i.test(t2))        colX.artName = colX.artName ?? x;
+      if (/article\s*(number|no\.?|#)/i.test(t) || /article\s*(number|no\.?|#)/i.test(t2) ||
+          /part\s*(number|no\.?|#)/i.test(t) || /item\s*(number|no\.?|#)/i.test(t))  colX.artNo = colX.artNo ?? x;
+      if (/^qty/i.test(t) || /quantity/i.test(t) || /^no\.\s*of/i.test(t))       colX.qty     = colX.qty     ?? x;
+      if (/delivery\s*location/i.test(t) || /delivery\s*location/i.test(t2) ||
+          /^location/i.test(t))                                                    colX.loc     = colX.loc     ?? x;
+      if (/truck/i.test(t) || /vehicle/i.test(t))                                 colX.truck   = colX.truck   ?? x;
+      if (/delivery\s*date/i.test(t) || /delivery\s*date/i.test(t2) ||
+          /required.*date/i.test(t) || /required.*date/i.test(t2))                colX.date    = colX.date    ?? x;
     }
   }
 
   scanHdrRow(rows[hdrIdx]);
   if (hdrIdx + 1 < rows.length) scanHdrRow(rows[hdrIdx + 1]);
+  if (hdrIdx + 2 < rows.length) scanHdrRow(rows[hdrIdx + 2]);
 
   if (colX.artNo === undefined && colX.artName === undefined)
-    throw new Error('Could not map column positions from PDF header row.');
+    throw new Error('Found the header row but could not identify Article Number or Article Name columns.' + debugSnippet());
 
-  // Parse data rows
+  // Parse data rows below header
   parsedLines = [];
 
   for (let i = hdrIdx + 1; i < rows.length; i++) {
@@ -349,23 +377,25 @@ function parsePDFContent(items, filename) {
 
     const artNo   = (fields.artNo   || '').trim();
     const artName = (fields.artName || '').trim();
-    if (!artNo || artNo === '0' || !artName || artName === '0') continue;
+    // Skip blank rows, pure-numeric rows that look like row numbers, and header repeats
+    if (!artNo && !artName) continue;
+    if (/^(\d{1,3}|no\.?|article|item|part)$/i.test(artNo) && !artName) continue;
 
-    const qty    = parseFloat(fields.qty)   || 0;
-    const loc    = (fields.loc   || '').trim();
-    const truck  = (fields.truck || '').trim();
+    const qty     = parseFloat(fields.qty)   || 0;
+    const loc     = (fields.loc   || '').trim();
+    const truck   = (fields.truck || '').trim();
     const dateISO = parseDateStr((fields.date || '').trim());
 
     parsedLines.push({ artNo, artName, qty, loc, truck, dateISO, dateDisp: isoToDisplay(dateISO) });
   }
 
   if (!parsedLines.length)
-    throw new Error('No line items found after the header row. Check that the PDF is a SPARK MTR with data rows.');
+    throw new Error('Header row found but no data rows extracted. The table may be empty or column positions could not be matched.' + debugSnippet());
 
   finishParse('PDF', filename);
 }
 
-// ── Excel parser ─────────────────────────────────────────────────────────────
+// ── Excel parser ────────────────────────────────────────────────────────────────────────────
 function parseMTR(wb, filename) {
   const sheetName = wb.SheetNames.find(n => /user\s+form/i.test(n));
   if (!sheetName) throw new Error('No "USER Form" sheet found. Expected a SPARK MTR Excel file.');
@@ -424,7 +454,7 @@ function parseMTR(wb, filename) {
   finishParse(sheetName, filename);
 }
 
-// ── Shared post-parse ─────────────────────────────────────────────────────────
+// ── Shared post-parse ─────────────────────────────────────────────────────────────────────────────
 function finishParse(sourceLabel, filename) {
   const pkgShort = packageShort(mtrMeta.package);
   document.getElementById('cfg-prefix').value   = pkgShort ? 'MTR-' + pkgShort : 'MTR';
@@ -446,7 +476,7 @@ function finishParse(sourceLabel, filename) {
   setStatus('parse-status', `<span style="color:var(--success)">✓ Parsed ${parsedLines.length} line(s) from <b>${esc(sourceLabel)}</b></span>${warnHtml}`);
 }
 
-// ── Render metadata ──────────────────────────────────────────────────────────
+// ── Render metadata ────────────────────────────────────────────────────────────────────────────
 function renderMeta() {
   const dates     = [...new Set(parsedLines.map(l => l.dateISO).filter(Boolean))].sort();
   const dateRange = dates.length === 1 ? isoToDisplay(dates[0])
@@ -467,7 +497,7 @@ function renderMeta() {
     </div>`).join('');
 }
 
-// ── Render preview table (editable cells) ────────────────────────────────────
+// ── Render preview table (editable cells) ─────────────────────────────────────────────────────────
 function renderPreview() {
   const prefix = document.getElementById('cfg-prefix').value.trim() || 'MTR';
   const tbody  = document.getElementById('preview-body');
@@ -528,7 +558,7 @@ document.getElementById('cfg-prefix').addEventListener('input', () => {
   }
 });
 
-// ── Add / delete rows ────────────────────────────────────────────────────────
+// ── Add / delete rows ─────────────────────────────────────────────────────────────────────────────
 function addRow() {
   const tbody = document.getElementById('preview-body');
   const tr    = document.createElement('tr');
@@ -568,7 +598,7 @@ function updateSummary() {
     `${n} line${n!==1?'s':''} · ${total} total items · ${dates.size} delivery date${dates.size!==1?'s':''} → ${dates.size} order${dates.size!==1?'s':''} in one import file`;
 }
 
-// ── Read current table state for generate() ──────────────────────────────────
+// ── Read current table state for generate() ──────────────────────────────────────────────────────────────────
 function getRowsFromTable() {
   const rows = document.querySelectorAll('#preview-body tr[data-row]');
   return Array.from(rows).map(tr => {
@@ -587,7 +617,7 @@ function getRowsFromTable() {
   }).filter(r => r.artNo || r.artName);
 }
 
-// ── Generate ─────────────────────────────────────────────────────────────────
+// ── Generate ──────────────────────────────────────────────────────────────────────────────────────
 function generate() {
   const custCode = document.getElementById('cfg-custcode').value.trim();
   const custName = document.getElementById('cfg-custname').value.trim();
@@ -662,7 +692,7 @@ function generate() {
     </div>`);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────────────────────────
 function excelDateToISO(serial) {
   if (!serial || isNaN(serial)) return '';
   const d = new Date(Math.round((serial - 25569) * 86400000));
