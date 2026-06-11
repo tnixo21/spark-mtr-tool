@@ -211,11 +211,11 @@ if (typeof pdfjsLib !== 'undefined') {
     'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 }
 
-// ── State ──────────────────────────────────────────────────────────────────────────────
+// ── State ────────────────────────────────────────────────────────────────────
 let parsedLines = [];   // [{artNo, artName, qty, loc, truck, dateISO, dateDisp}, ...]
 let mtrMeta = {};       // {package, company, phone, requestDate}
 
-// ── Drag & Drop ──────────────────────────────────────────────────────────────────────────
+// ── Drag & Drop ──────────────────────────────────────────────────────────────
 function dzOver(e) { e.preventDefault(); document.getElementById('dz').classList.add('over'); }
 function dzLeave(e) { document.getElementById('dz').classList.remove('over'); }
 function dzDrop(e) {
@@ -225,7 +225,7 @@ function dzDrop(e) {
   if (f) loadFile(f);
 }
 
-// ── File load dispatcher ───────────────────────────────────────────────────────────────────────
+// ── File load dispatcher ─────────────────────────────────────────────────────
 function loadFile(file) {
   if (!file) return;
   document.getElementById('dz').classList.remove('over');
@@ -237,7 +237,7 @@ function loadFile(file) {
   }
 }
 
-// ── Excel loader ─────────────────────────────────────────────────────────────────────────────
+// ── Excel loader ─────────────────────────────────────────────────────────────
 function loadExcelFile(file) {
   setStatus('parse-status', '<span class="spin"></span> Parsing Excel…');
   const reader = new FileReader();
@@ -254,7 +254,7 @@ function loadExcelFile(file) {
   reader.readAsArrayBuffer(file);
 }
 
-// ── PDF loader ─────────────────────────────────────────────────────────────────────────────
+// ── PDF loader ───────────────────────────────────────────────────────────────
 async function loadPDFFile(file) {
   if (typeof pdfjsLib === 'undefined') {
     setStatus('parse-status', `<span style="color:var(--danger)">✗ PDF.js failed to load. Check your internet connection and reload the page.</span>`);
@@ -269,14 +269,13 @@ async function loadPDFFile(file) {
     for (let p = 1; p <= pdf.numPages; p++) {
       const page    = await pdf.getPage(p);
       const content = await page.getTextContent();
-      const vp      = page.getViewport({ scale: 1 });
       for (const item of content.items) {
         const str = (item.str || '').trim();
         if (str) {
           allItems.push({
             text: str,
             x:    item.transform[4],
-            y:    vp.height - item.transform[5],
+            y:    item.transform[5],
             page: p
           });
         }
@@ -302,8 +301,9 @@ function markDzFilled(name) {
   dz.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><div class="primary">${esc(name)}</div>`;
 }
 
-// ── PDF content parser ───────────────────────────────────────────────────────────────────────────
+// ── PDF content parser ───────────────────────────────────────────────────────
 function parsePDFContent(items, filename) {
+  // Sort ascending by Y — SPARK MTR PDFs use screen-style coords (Y=0 at top)
   items.sort((a, b) => a.page !== b.page ? a.page - b.page : a.y - b.y);
 
   const ROW_TOL = 10;
@@ -320,6 +320,7 @@ function parsePDFContent(items, filename) {
   }
   for (const row of rows) row.sort((a, b) => a.x - b.x);
 
+  // Build a debug snippet (first 40 rows, ≤8 items each) shown on failure
   function debugSnippet() {
     const lines = rows.slice(0, 40).map((r, i) =>
       `[${i}] ` + r.map(it => `"${it.text}"@(${Math.round(it.x)},${Math.round(it.y)})`).slice(0, 8).join('  ')
@@ -327,6 +328,7 @@ function parsePDFContent(items, filename) {
     return '\n\nFirst rows extracted from PDF:\n' + lines.join('\n');
   }
 
+  // Find the header row
   let hdrIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     const joined = rows[i].map(it => it.text).join(' ');
@@ -347,6 +349,7 @@ function parsePDFContent(items, filename) {
     debugSnippet()
   );
 
+  // Extract metadata from rows before the header
   mtrMeta = { package: '', company: '', phone: '', requestDate: '' };
   for (let i = 0; i < hdrIdx; i++) {
     for (let j = 0; j < rows[i].length; j++) {
@@ -367,6 +370,7 @@ function parsePDFContent(items, filename) {
     }
   }
 
+  // Map column X positions — scan header row + next 2 rows (handles split headers)
   const COL_TOL = 60;
   const colX    = {};
 
@@ -395,6 +399,7 @@ function parsePDFContent(items, filename) {
   if (colX.artNo === undefined && colX.artName === undefined)
     throw new Error('Found the header row but could not identify Article Number or Article Name columns.' + debugSnippet());
 
+  // Parse data rows below header
   parsedLines = [];
 
   for (let i = hdrIdx + 1; i < rows.length; i++) {
@@ -428,7 +433,7 @@ function parsePDFContent(items, filename) {
   finishParse('PDF', filename);
 }
 
-// ── Excel parser ────────────────────────────────────────────────────────────────────────────
+// ── Excel parser ─────────────────────────────────────────────────────────────
 function parseMTR(wb, filename) {
   const sheetName = wb.SheetNames.find(n => /user\s+form/i.test(n));
   if (!sheetName) throw new Error('No "USER Form" sheet found. Expected a SPARK MTR Excel file.');
@@ -487,7 +492,7 @@ function parseMTR(wb, filename) {
   finishParse(sheetName, filename);
 }
 
-// ── Shared post-parse ─────────────────────────────────────────────────────────────────────────────
+// ── Shared post-parse ─────────────────────────────────────────────────────────
 function finishParse(sourceLabel, filename) {
   const pkgShort = packageShort(mtrMeta.package);
   document.getElementById('cfg-prefix').value   = pkgShort ? 'MTR-' + pkgShort : 'MTR';
@@ -509,7 +514,7 @@ function finishParse(sourceLabel, filename) {
   setStatus('parse-status', `<span style="color:var(--success)">✓ Parsed ${parsedLines.length} line(s) from <b>${esc(sourceLabel)}</b></span>${warnHtml}`);
 }
 
-// ── Render metadata ────────────────────────────────────────────────────────────────────────────
+// ── Render metadata ──────────────────────────────────────────────────────────
 function renderMeta() {
   const dates     = [...new Set(parsedLines.map(l => l.dateISO).filter(Boolean))].sort();
   const dateRange = dates.length === 1 ? isoToDisplay(dates[0])
@@ -530,7 +535,7 @@ function renderMeta() {
     </div>`).join('');
 }
 
-// ── Render preview table (editable cells) ─────────────────────────────────────────────────────────
+// ── Render preview table (editable cells) ────────────────────────────────────
 function renderPreview() {
   const prefix = document.getElementById('cfg-prefix').value.trim() || 'MTR';
   const tbody  = document.getElementById('preview-body');
@@ -562,6 +567,7 @@ function renderPreview() {
   updateSummary();
 }
 
+// Update only order-number cells when prefix changes (preserves any edits)
 function updateOrderNumbers() {
   const prefix   = document.getElementById('cfg-prefix').value.trim() || 'MTR';
   const dataRows = document.querySelectorAll('#preview-body tr[data-row]');
@@ -590,6 +596,7 @@ document.getElementById('cfg-prefix').addEventListener('input', () => {
   }
 });
 
+// ── Add / delete rows ────────────────────────────────────────────────────────
 function addRow() {
   const tbody = document.getElementById('preview-body');
   const tr    = document.createElement('tr');
@@ -629,6 +636,7 @@ function updateSummary() {
     `${n} line${n!==1?'s':''} · ${total} total items · ${dates.size} delivery date${dates.size!==1?'s':''} → ${dates.size} order${dates.size!==1?'s':''} in one import file`;
 }
 
+// ── Read current table state for generate() ──────────────────────────────────
 function getRowsFromTable() {
   const rows = document.querySelectorAll('#preview-body tr[data-row]');
   return Array.from(rows).map(tr => {
@@ -647,7 +655,7 @@ function getRowsFromTable() {
   }).filter(r => r.artNo || r.artName);
 }
 
-// ── Generate (Excel download) ────────────────────────────────────────────────────────────────────────────────
+// ── Generate (Excel download) ─────────────────────────────────────────────────
 function generate() {
   const custCode = document.getElementById('cfg-custcode').value.trim();
   const custName = document.getElementById('cfg-custname').value.trim();
@@ -722,7 +730,7 @@ function generate() {
     </div>`);
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function excelDateToISO(serial) {
   if (!serial || isNaN(serial)) return '';
   const d = new Date(Math.round((serial - 25569) * 86400000));
@@ -747,13 +755,16 @@ function displayToISO(disp) {
 
 function parseDateStr(str) {
   if (!str) return '';
+  // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
   const m1 = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
   if (m1) {
     const [, d, mo, y] = m1;
     const year = y.length === 2 ? '20' + y : y;
     return `${year}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
   }
+  // Already ISO
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  // Excel serial
   const serial = parseFloat(str);
   if (serial > 40000 && serial < 60000) return excelDateToISO(serial);
   return '';
@@ -789,7 +800,7 @@ function setStatus(id, html) {
   document.getElementById(id).innerHTML = html;
 }
 
-// ── Ongoing WMS direct submit ──────────────────────────────────────────────────────────────────────────
+// ── Ongoing WMS direct submit ────────────────────────────────────────────────
 function submitToOngoing() {
   const custCode = document.getElementById('cfg-custcode').value.trim();
   if (!custCode) {
