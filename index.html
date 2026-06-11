@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SPARK MTR → Ongoing WMS</title>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -58,6 +59,18 @@ tr:hover td{background:rgba(255,255,255,.02)}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 code{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:.8em}
+
+/* Editable table cells */
+.ec{outline:none;border-radius:3px;padding:1px 3px;cursor:text;min-width:10px;display:block}
+.ec:hover{background:rgba(255,255,255,.05)}
+.ec:focus{background:rgba(79,142,247,.1);outline:1px solid rgba(79,142,247,.4)}
+.ec.mono{font-family:monospace;font-size:.85em}
+td.num .ec{font-weight:600}
+.edit-hint{font-size:.73rem;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:5px}
+.btn-add-row{background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.25);border-radius:6px;color:#93c5fd;font-size:.76rem;padding:4px 12px;cursor:pointer;font-family:inherit;margin-top:6px;transition:background .15s}
+.btn-add-row:hover{background:rgba(79,142,247,.2)}
+.btn-del{background:none;border:none;cursor:pointer;color:var(--muted);padding:2px 5px;border-radius:3px;font-size:.85em;line-height:1;transition:color .15s}
+.btn-del:hover{color:var(--danger)}
 </style>
 </head>
 <body>
@@ -65,18 +78,18 @@ code{background:var(--surface2);border:1px solid var(--border);border-radius:4px
 
 <div class="header">
   <h1>SPARK MTR → Ongoing WMS</h1>
-  <p>Parse a SPARK Material Transfer Request Excel → generate Ongoing WMS outbound order import file.</p>
+  <p>Parse a SPARK Material Transfer Request (Excel or PDF) → generate Ongoing WMS outbound order import file.</p>
 </div>
 
 <!-- Step 1: Upload -->
 <div class="card">
-  <div class="card-title"><div class="step-num">1</div> Load MTR Excel</div>
+  <div class="card-title"><div class="step-num">1</div> Load MTR File</div>
   <div class="dz" id="dz" onclick="document.getElementById('fi').click()" ondragover="dzOver(event)" ondragleave="dzLeave(event)" ondrop="dzDrop(event)">
     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-    <div class="primary">Drop SPARK MTR Excel here or click to browse</div>
-    <div class="secondary">File: <em>MTR - Material Transfer Request - pkg_XXXX…</em> (xlsx)</div>
+    <div class="primary">Drop SPARK MTR file here or click to browse</div>
+    <div class="secondary">Accepts Excel (.xlsx) or PDF — <em>MTR - Material Transfer Request - pkg_XXXX…</em></div>
   </div>
-  <input type="file" id="fi" accept=".xlsx,.xls" style="display:none" onchange="loadFile(this.files[0])">
+  <input type="file" id="fi" accept=".xlsx,.xls,.pdf" style="display:none" onchange="loadFile(this.files[0])">
   <div id="parse-status" style="margin-top:10px"></div>
 </div>
 
@@ -107,6 +120,10 @@ code{background:var(--surface2);border:1px solid var(--border);border-radius:4px
 
   <!-- Preview table -->
   <div id="preview-warn"></div>
+  <div class="edit-hint">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    Click any cell to edit — correct article numbers, quantities, dates or locations before generating.
+  </div>
   <div class="tbl-scroll">
     <table>
       <thead>
@@ -117,13 +134,15 @@ code{background:var(--surface2);border:1px solid var(--border);border-radius:4px
           <th>Qty</th>
           <th>Delivery Location</th>
           <th>Truck</th>
-          <th>Delivery Date</th>
+          <th>Delivery Date <span style="font-weight:400;opacity:.6">(DD/MM/YYYY)</span></th>
           <th>Order No. (generated)</th>
+          <th></th>
         </tr>
       </thead>
       <tbody id="preview-body"></tbody>
     </table>
   </div>
+  <button class="btn-add-row" onclick="addRow()">+ Add row</button>
   <div id="preview-summary" style="margin-top:8px;font-size:.78rem;color:var(--muted)"></div>
 </div>
 
@@ -144,8 +163,14 @@ code{background:var(--surface2);border:1px solid var(--border);border-radius:4px
 <script>
 'use strict';
 
+// Set PDF.js worker (loaded from CDN above)
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
-let parsedLines = [];   // [{artNo, artName, qty, loc, truck, dateSerial, dateISO, dateDisp}, ...]
+let parsedLines = [];   // [{artNo, artName, qty, loc, truck, dateISO, dateDisp}, ...]
 let mtrMeta = {};       // {package, company, phone, requestDate}
 
 // ── Drag & Drop ──────────────────────────────────────────────────────────────
@@ -158,104 +183,257 @@ function dzDrop(e) {
   if (f) loadFile(f);
 }
 
-// ── File load ────────────────────────────────────────────────────────────────
+// ── File load dispatcher ─────────────────────────────────────────────────────
 function loadFile(file) {
   if (!file) return;
-  const dz = document.getElementById('dz');
-  dz.classList.remove('over');
-  setStatus('parse-status', '<span class="spin"></span> Parsing…', '');
+  document.getElementById('dz').classList.remove('over');
+  const ext = file.name.toLowerCase().split('.').pop();
+  if (ext === 'pdf') {
+    loadPDFFile(file);
+  } else {
+    loadExcelFile(file);
+  }
+}
 
+// ── Excel loader ─────────────────────────────────────────────────────────────
+function loadExcelFile(file) {
+  setStatus('parse-status', '<span class="spin"></span> Parsing Excel…');
   const reader = new FileReader();
   reader.onload = e => {
     try {
       const wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
       parseMTR(wb, file.name);
-      dz.classList.add('filled');
-      dz.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><div class="primary">${esc(file.name)}</div>`;
+      markDzFilled(file.name);
     } catch(err) {
-      setStatus('parse-status', `<span style="color:var(--danger)">✗ Parse error: ${esc(err.message)}</span>`, '');
+      setStatus('parse-status', `<span style="color:var(--danger)">✗ Parse error: ${esc(err.message)}</span>`);
       console.error(err);
     }
   };
   reader.readAsArrayBuffer(file);
 }
 
-// ── Parser ───────────────────────────────────────────────────────────────────
+// ── PDF loader ───────────────────────────────────────────────────────────────
+async function loadPDFFile(file) {
+  if (typeof pdfjsLib === 'undefined') {
+    setStatus('parse-status', `<span style="color:var(--danger)">✗ PDF.js failed to load. Check your internet connection and reload the page.</span>`);
+    return;
+  }
+  setStatus('parse-status', '<span class="spin"></span> Parsing PDF…');
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+    let allItems = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page    = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      const vp      = page.getViewport({ scale: 1 });
+      for (const item of content.items) {
+        const str = (item.str || '').trim();
+        if (str) {
+          allItems.push({
+            text: str,
+            x:    item.transform[4],
+            y:    vp.height - item.transform[5],
+            page: p
+          });
+        }
+      }
+    }
+
+    if (!allItems.length) throw new Error('No text found in PDF — is it a scanned image?');
+
+    parsePDFContent(allItems, file.name);
+    markDzFilled(file.name);
+  } catch(err) {
+    setStatus('parse-status', `<span style="color:var(--danger)">✗ PDF error: ${esc(err.message)}</span>`);
+    console.error(err);
+  }
+}
+
+function markDzFilled(name) {
+  const dz = document.getElementById('dz');
+  dz.classList.add('filled');
+  dz.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><div class="primary">${esc(name)}</div>`;
+}
+
+// ── PDF content parser ───────────────────────────────────────────────────────
+function parsePDFContent(items, filename) {
+  // Group text items into visual rows by Y coordinate (±5px = same row)
+  items.sort((a, b) => a.page !== b.page ? a.page - b.page : a.y - b.y);
+
+  const ROW_TOL = 5;
+  const rows = [];
+  let lastY = -9999, lastPage = -1;
+
+  for (const item of items) {
+    if (item.page !== lastPage || Math.abs(item.y - lastY) > ROW_TOL) {
+      rows.push([]);
+      lastY = item.y;
+      lastPage = item.page;
+    }
+    rows[rows.length - 1].push(item);
+  }
+  for (const row of rows) row.sort((a, b) => a.x - b.x);
+
+  // Find the header row containing "Article Number" or "Article No"
+  let hdrIdx = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const joined = rows[i].map(it => it.text).join(' ');
+    if (/article\s*(number|no\.?)/i.test(joined)) { hdrIdx = i; break; }
+  }
+  if (hdrIdx < 0) throw new Error('Could not find "Article Number" header row in PDF. Is this a SPARK MTR?');
+
+  // Extract metadata from rows before the header
+  mtrMeta = { package: '', company: '', phone: '', requestDate: '' };
+  for (let i = 0; i < hdrIdx; i++) {
+    for (let j = 0; j < rows[i].length; j++) {
+      const t    = rows[i][j].text;
+      const next = rows[i][j + 1] ? rows[i][j + 1].text.trim() : '';
+      // "Label: Value" in single text item
+      const colon = t.indexOf(':');
+      if (colon > 0) {
+        const lbl = t.slice(0, colon).trim();
+        const val = t.slice(colon + 1).trim() || next;
+        if (/^package$/i.test(lbl) && val)            mtrMeta.package     = val;
+        if (/requester.*company/i.test(lbl) && val)   mtrMeta.company     = val;
+        if (/date.*request/i.test(lbl) && val)        mtrMeta.requestDate = val;
+      } else {
+        // Label in one cell, value in adjacent cell
+        if (/^package$/i.test(t) && next)             mtrMeta.package     = next;
+        if (/requester.*company/i.test(t) && next)    mtrMeta.company     = next;
+        if (/date.*request/i.test(t) && next)         mtrMeta.requestDate = next;
+      }
+    }
+  }
+
+  // Map column X positions from the header row
+  // Also scan the next row in case it's a two-row header
+  const COL_TOL = 40;
+  const colX    = {};
+
+  function scanHdrRow(row) {
+    for (let j = 0; j < row.length; j++) {
+      const t  = row[j].text;
+      const t2 = j + 1 < row.length ? t + ' ' + row[j + 1].text : t;
+      const x  = row[j].x;
+      if (/article\s*name/i.test(t) || /article\s*name/i.test(t2))           colX.artName = colX.artName ?? x;
+      if (/article\s*(number|no\.?)/i.test(t) || /article\s*(number|no\.?)/i.test(t2)) colX.artNo = colX.artNo ?? x;
+      if (/^qty/i.test(t) || /quantity/i.test(t))                            colX.qty     = colX.qty     ?? x;
+      if (/delivery\s*location/i.test(t) || /delivery\s*location/i.test(t2)) colX.loc     = colX.loc     ?? x;
+      if (/truck/i.test(t))                                                   colX.truck   = colX.truck   ?? x;
+      if (/delivery\s*date/i.test(t) || /delivery\s*date/i.test(t2))         colX.date    = colX.date    ?? x;
+    }
+  }
+
+  scanHdrRow(rows[hdrIdx]);
+  if (hdrIdx + 1 < rows.length) scanHdrRow(rows[hdrIdx + 1]);
+
+  if (colX.artNo === undefined && colX.artName === undefined)
+    throw new Error('Could not map column positions from PDF header row.');
+
+  // Parse data rows
+  parsedLines = [];
+
+  for (let i = hdrIdx + 1; i < rows.length; i++) {
+    const row    = rows[i];
+    const fields = {};
+
+    for (const item of row) {
+      for (const [field, cx] of Object.entries(colX)) {
+        if (Math.abs(item.x - cx) < COL_TOL) {
+          fields[field] = fields[field] ? fields[field] + ' ' + item.text : item.text;
+        }
+      }
+    }
+
+    const artNo   = (fields.artNo   || '').trim();
+    const artName = (fields.artName || '').trim();
+    if (!artNo || artNo === '0' || !artName || artName === '0') continue;
+
+    const qty    = parseFloat(fields.qty)   || 0;
+    const loc    = (fields.loc   || '').trim();
+    const truck  = (fields.truck || '').trim();
+    const dateISO = parseDateStr((fields.date || '').trim());
+
+    parsedLines.push({ artNo, artName, qty, loc, truck, dateISO, dateDisp: isoToDisplay(dateISO) });
+  }
+
+  if (!parsedLines.length)
+    throw new Error('No line items found after the header row. Check that the PDF is a SPARK MTR with data rows.');
+
+  finishParse('PDF', filename);
+}
+
+// ── Excel parser ─────────────────────────────────────────────────────────────
 function parseMTR(wb, filename) {
-  // Find the USER Form sheet
   const sheetName = wb.SheetNames.find(n => /user\s+form/i.test(n));
   if (!sheetName) throw new Error('No "USER Form" sheet found. Expected a SPARK MTR Excel file.');
 
-  const ws = wb.Sheets[sheetName];
+  const ws  = wb.Sheets[sheetName];
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-  // Extract metadata — scan first 10 rows for Package, Company, Date
   mtrMeta = { package: '', company: '', phone: '', requestDate: '' };
   for (let i = 0; i < Math.min(raw.length, 12); i++) {
-    const r = raw[i];
+    const r     = raw[i];
     const label = String(r[2] || '').trim().toLowerCase();
     const val   = String(r[3] || '').trim();
-    if (/^package/i.test(label))           mtrMeta.package     = val;
-    if (/^requester\s+company/i.test(label)) mtrMeta.company   = val;
-    if (/^requester\s+phone/i.test(label))   mtrMeta.phone     = val;
+    if (/^package/i.test(label))             mtrMeta.package     = val;
+    if (/^requester\s+company/i.test(label)) mtrMeta.company     = val;
+    if (/^requester\s+phone/i.test(label))   mtrMeta.phone       = val;
     if (/^date\s+of\s+request/i.test(label)) mtrMeta.requestDate = val;
   }
 
-  // Find header row — the row containing "Article Number"
   let headerIdx = -1;
   for (let i = 0; i < Math.min(raw.length, 20); i++) {
-    if (raw[i].some(c => /^article\s+number$/i.test(String(c).trim()))) {
-      headerIdx = i; break;
-    }
+    if (raw[i].some(c => /^article\s+number$/i.test(String(c).trim()))) { headerIdx = i; break; }
   }
   if (headerIdx < 0) throw new Error('Could not find header row with "Article Number" in USER Form sheet.');
 
   const hdr = raw[headerIdx].map(c => String(c).trim().toLowerCase());
-  const ci = {
-    artName : hdr.findIndex(c => /^article\s+name$/i.test(c)),
-    artNo   : hdr.findIndex(c => /^article\s+number$/i.test(c)),
-    qty     : hdr.findIndex(c => /^qty\s+requested$/i.test(c)),
-    loc     : hdr.findIndex(c => /^delivery\s+location$/i.test(c)),
-    truck   : hdr.findIndex(c => /^truck\s+no/i.test(c)),
-    date    : hdr.findIndex(c => /^delivery\s+date$/i.test(c)),
+  const ci  = {
+    artName: hdr.findIndex(c => /^article\s+name$/i.test(c)),
+    artNo:   hdr.findIndex(c => /^article\s+number$/i.test(c)),
+    qty:     hdr.findIndex(c => /^qty\s+requested$/i.test(c)),
+    loc:     hdr.findIndex(c => /^delivery\s+location$/i.test(c)),
+    truck:   hdr.findIndex(c => /^truck\s+no/i.test(c)),
+    date:    hdr.findIndex(c => /^delivery\s+date$/i.test(c)),
   };
 
   if (ci.artNo < 0 || ci.artName < 0) throw new Error('Could not map Article Number / Article Name columns.');
 
-  // Data rows
   parsedLines = [];
   for (let i = headerIdx + 1; i < raw.length; i++) {
-    const r = raw[i];
+    const r       = raw[i];
     const artNo   = String(r[ci.artNo]   ?? '').trim();
     const artName = String(r[ci.artName] ?? '').trim();
-
-    // Skip blank or placeholder rows
     if (!artNo || artNo === '0' || !artName || artName === '0') continue;
 
-    const qty        = ci.qty  >= 0 ? Number(r[ci.qty])  || 0 : 0;
-    const loc        = ci.loc  >= 0 ? String(r[ci.loc]  ?? '').trim() : '';
+    const qty        = ci.qty   >= 0 ? Number(r[ci.qty])  || 0 : 0;
+    const loc        = ci.loc   >= 0 ? String(r[ci.loc]   ?? '').trim() : '';
     const truck      = ci.truck >= 0 ? String(r[ci.truck] ?? '').trim() : '';
-    const dateRaw    = ci.date >= 0 ? r[ci.date] : '';
+    const dateRaw    = ci.date  >= 0 ? r[ci.date] : '';
     const dateSerial = typeof dateRaw === 'number' ? dateRaw : (parseFloat(dateRaw) || 0);
     const dateISO    = excelDateToISO(dateSerial);
-    const dateDisp   = isoToDisplay(dateISO);
 
-    parsedLines.push({ artNo, artName, qty, loc, truck, dateSerial, dateISO, dateDisp });
+    parsedLines.push({ artNo, artName, qty, loc, truck, dateISO, dateDisp: isoToDisplay(dateISO) });
   }
 
   if (!parsedLines.length) throw new Error('No line items found in USER Form. Check the file has data rows below the Article Number header.');
 
-  // Auto-fill config defaults
+  finishParse(sheetName, filename);
+}
+
+// ── Shared post-parse ─────────────────────────────────────────────────────────
+function finishParse(sourceLabel, filename) {
   const pkgShort = packageShort(mtrMeta.package);
   document.getElementById('cfg-prefix').value   = pkgShort ? 'MTR-' + pkgShort : 'MTR';
   document.getElementById('cfg-custname').value  = 'SPARK NEL';
   document.getElementById('cfg-custcode').value  = '';
 
-  // Warn if any delivery dates are in the past
-  const today = new Date().toISOString().slice(0, 10);
+  const today     = new Date().toISOString().slice(0, 10);
   const pastDates = [...new Set(parsedLines.filter(l => l.dateISO && l.dateISO < today).map(l => l.dateDisp))];
 
-  // Render
   renderMeta();
   renderPreview();
   document.getElementById('preview-card').style.display  = '';
@@ -263,25 +441,25 @@ function parseMTR(wb, filename) {
 
   let warnHtml = '';
   if (pastDates.length) {
-    warnHtml = `<div class="warn-box" style="margin-top:10px">⚠ ${pastDates.length} delivery date(s) are in the past: <b>${pastDates.join(', ')}</b>. Verify the dates are correct before importing — Ongoing may reject past-dated orders.</div>`;
+    warnHtml = `<div class="warn-box" style="margin-top:10px">⚠ ${pastDates.length} delivery date(s) are in the past: <b>${pastDates.join(', ')}</b>. Verify before importing — Ongoing may reject past-dated orders.</div>`;
   }
-  setStatus('parse-status', `<span style="color:var(--success)">✓ Parsed ${parsedLines.length} line(s) from <b>${esc(sheetName)}</b></span>${warnHtml}`, '');
+  setStatus('parse-status', `<span style="color:var(--success)">✓ Parsed ${parsedLines.length} line(s) from <b>${esc(sourceLabel)}</b></span>${warnHtml}`);
 }
 
 // ── Render metadata ──────────────────────────────────────────────────────────
 function renderMeta() {
-  const dates = [...new Set(parsedLines.map(l => l.dateISO).filter(Boolean))].sort();
+  const dates     = [...new Set(parsedLines.map(l => l.dateISO).filter(Boolean))].sort();
   const dateRange = dates.length === 1 ? isoToDisplay(dates[0])
     : dates.length > 1 ? `${isoToDisplay(dates[0])} – ${isoToDisplay(dates[dates.length-1])}`
     : '(no dates)';
 
   document.getElementById('meta-grid').innerHTML = [
-    ['Package', mtrMeta.package || '—'],
+    ['Package',           mtrMeta.package || '—'],
     ['Requester Company', mtrMeta.company || '—'],
-    ['Date of Request', mtrMeta.requestDate || '—'],
-    ['Delivery Date(s)', dateRange],
-    ['Line Items', parsedLines.length + ' lines'],
-    ['Delivery Groups', dates.length + ' date(s)'],
+    ['Date of Request',   mtrMeta.requestDate || '—'],
+    ['Delivery Date(s)',  dateRange],
+    ['Line Items',        parsedLines.length + ' lines'],
+    ['Delivery Groups',   dates.length + ' date(s)'],
   ].map(([label, val]) => `
     <div class="meta-item">
       <div class="meta-label">${label}</div>
@@ -289,57 +467,141 @@ function renderMeta() {
     </div>`).join('');
 }
 
-// ── Render preview table ─────────────────────────────────────────────────────
+// ── Render preview table (editable cells) ────────────────────────────────────
 function renderPreview() {
   const prefix = document.getElementById('cfg-prefix').value.trim() || 'MTR';
   const tbody  = document.getElementById('preview-body');
-
-  // Group by date
   const groups = groupByDate(parsedLines);
-  let html = '';
-  let rowNum = 1;
+  let html     = '';
+  let rowNum   = 1;
 
   for (const [dateISO, lines] of Object.entries(groups)) {
     const orderNo = orderNoFor(prefix, dateISO);
-    html += `<tr class="date-group-hdr"><td colspan="8">${esc(orderNo)} — ${esc(isoToDisplay(dateISO))} (${lines.length} line${lines.length>1?'s':''})</td></tr>`;
+    const cnt     = lines.length;
+    html += `<tr class="date-group-hdr" data-group-date="${esc(dateISO)}"><td colspan="9">${esc(orderNo)} — ${esc(isoToDisplay(dateISO))} (${cnt} line${cnt>1?'s':''})</td></tr>`;
     for (const l of lines) {
-      html += `<tr>
+      const idx = parsedLines.indexOf(l);
+      html += `<tr data-row="${idx}" data-date="${esc(l.dateISO)}">
         <td style="color:var(--muted)">${rowNum++}</td>
-        <td><code>${esc(l.artNo)}</code></td>
-        <td>${esc(l.artName)}</td>
-        <td style="font-weight:600">${l.qty}</td>
-        <td>${esc(l.loc)}</td>
-        <td>${esc(l.truck)}</td>
-        <td style="white-space:nowrap">${esc(l.dateDisp)}</td>
-        <td style="color:var(--muted);font-size:.78rem">${esc(orderNo)}</td>
+        <td><div contenteditable="true" spellcheck="false" data-field="artNo" class="ec mono">${esc(l.artNo)}</div></td>
+        <td><div contenteditable="true" spellcheck="false" data-field="artName" class="ec">${esc(l.artName)}</div></td>
+        <td class="num"><div contenteditable="true" spellcheck="false" data-field="qty" class="ec">${l.qty}</div></td>
+        <td><div contenteditable="true" spellcheck="false" data-field="loc" class="ec">${esc(l.loc)}</div></td>
+        <td><div contenteditable="true" spellcheck="false" data-field="truck" class="ec">${esc(l.truck)}</div></td>
+        <td><div contenteditable="true" spellcheck="false" data-field="date" class="ec" style="white-space:nowrap">${esc(l.dateDisp)}</div></td>
+        <td style="color:var(--muted);font-size:.78rem" class="order-no-cell">${esc(orderNo)}</td>
+        <td><button class="btn-del" title="Delete row" onclick="delRow(this)">✕</button></td>
       </tr>`;
     }
   }
 
   tbody.innerHTML = html;
-
-  const totalQty = parsedLines.reduce((s, l) => s + l.qty, 0);
-  const dateCount = Object.keys(groups).length;
-  document.getElementById('preview-summary').textContent =
-    `${parsedLines.length} lines · ${totalQty} total items · ${dateCount} delivery date${dateCount>1?'s':''} → ${dateCount} order${dateCount>1?'s':''} in one import file`;
+  updateSummary();
 }
 
-// Re-render on prefix change
-document.getElementById('cfg-prefix').addEventListener('input', renderPreview);
+// Update only order-number cells when prefix changes (preserves any edits)
+function updateOrderNumbers() {
+  const prefix   = document.getElementById('cfg-prefix').value.trim() || 'MTR';
+  const dataRows = document.querySelectorAll('#preview-body tr[data-row]');
+  const seen     = new Set();
+
+  for (const tr of dataRows) {
+    const dateISO = tr.dataset.date;
+    const orderNo = orderNoFor(prefix, dateISO);
+    const cell    = tr.querySelector('.order-no-cell');
+    if (cell) cell.textContent = orderNo;
+
+    if (!seen.has(dateISO)) {
+      const prev = tr.previousElementSibling;
+      if (prev && prev.classList.contains('date-group-hdr')) {
+        const cnt = document.querySelectorAll(`#preview-body tr[data-row][data-date="${CSS.escape(dateISO)}"]`).length;
+        prev.querySelector('td').textContent = `${orderNo} — ${isoToDisplay(dateISO)} (${cnt} line${cnt>1?'s':''})`;
+      }
+      seen.add(dateISO);
+    }
+  }
+}
+
+document.getElementById('cfg-prefix').addEventListener('input', () => {
+  if (document.querySelector('#preview-body tr[data-row]')) {
+    updateOrderNumbers();
+  }
+});
+
+// ── Add / delete rows ────────────────────────────────────────────────────────
+function addRow() {
+  const tbody = document.getElementById('preview-body');
+  const tr    = document.createElement('tr');
+  tr.dataset.row  = 'new-' + Date.now();
+  tr.dataset.date = '';
+  tr.innerHTML = `
+    <td style="color:var(--muted)">—</td>
+    <td><div contenteditable="true" spellcheck="false" data-field="artNo" class="ec mono"></div></td>
+    <td><div contenteditable="true" spellcheck="false" data-field="artName" class="ec"></div></td>
+    <td class="num"><div contenteditable="true" spellcheck="false" data-field="qty" class="ec">0</div></td>
+    <td><div contenteditable="true" spellcheck="false" data-field="loc" class="ec"></div></td>
+    <td><div contenteditable="true" spellcheck="false" data-field="truck" class="ec"></div></td>
+    <td><div contenteditable="true" spellcheck="false" data-field="date" class="ec" style="white-space:nowrap"></div></td>
+    <td style="color:var(--muted);font-size:.78rem" class="order-no-cell">—</td>
+    <td><button class="btn-del" title="Delete row" onclick="delRow(this)">✕</button></td>`;
+  tbody.appendChild(tr);
+  tr.querySelector('[data-field="artNo"]').focus();
+  updateSummary();
+}
+
+function delRow(btn) {
+  btn.closest('tr').remove();
+  updateSummary();
+}
+
+function updateSummary() {
+  const rows  = document.querySelectorAll('#preview-body tr[data-row]');
+  const dates = new Set();
+  let   total = 0;
+  for (const tr of rows) {
+    total += parseFloat(tr.querySelector('[data-field="qty"]')?.textContent || '0') || 0;
+    const d = tr.dataset.date || displayToISO((tr.querySelector('[data-field="date"]')?.textContent || '').trim());
+    if (d) dates.add(d);
+  }
+  const n = rows.length;
+  document.getElementById('preview-summary').textContent =
+    `${n} line${n!==1?'s':''} · ${total} total items · ${dates.size} delivery date${dates.size!==1?'s':''} → ${dates.size} order${dates.size!==1?'s':''} in one import file`;
+}
+
+// ── Read current table state for generate() ──────────────────────────────────
+function getRowsFromTable() {
+  const rows = document.querySelectorAll('#preview-body tr[data-row]');
+  return Array.from(rows).map(tr => {
+    const get      = f => (tr.querySelector(`[data-field="${f}"]`) || {}).textContent || '';
+    const dateDisp = get('date').trim();
+    const dateISO  = displayToISO(dateDisp) || tr.dataset.date || '';
+    return {
+      artNo:   get('artNo').trim(),
+      artName: get('artName').trim(),
+      qty:     parseFloat(get('qty').trim()) || 0,
+      loc:     get('loc').trim(),
+      truck:   get('truck').trim(),
+      dateISO,
+      dateDisp,
+    };
+  }).filter(r => r.artNo || r.artName);
+}
 
 // ── Generate ─────────────────────────────────────────────────────────────────
 function generate() {
-  const custCode  = document.getElementById('cfg-custcode').value.trim();
-  const custName  = document.getElementById('cfg-custname').value.trim();
-  const prefix    = document.getElementById('cfg-prefix').value.trim() || 'MTR';
+  const custCode = document.getElementById('cfg-custcode').value.trim();
+  const custName = document.getElementById('cfg-custname').value.trim();
+  const prefix   = document.getElementById('cfg-prefix').value.trim() || 'MTR';
 
   if (!custCode) {
-    setStatus('gen-status', '<span style="color:var(--danger)">✗ Customer Code is required. Enter the Ongoing customer number for SPARK-NEL before generating.</span>', '');
+    setStatus('gen-status', '<span style="color:var(--danger)">✗ Customer Code is required. Enter the Ongoing customer number for SPARK-NEL before generating.</span>');
     document.getElementById('cfg-custcode').focus();
     return;
   }
-  if (!parsedLines.length) {
-    setStatus('gen-status', '<span style="color:var(--danger)">✗ No lines to export. Load a MTR file first.</span>', '');
+
+  const lines = getRowsFromTable();
+  if (!lines.length) {
+    setStatus('gen-status', '<span style="color:var(--danger)">✗ No lines to export. Load a MTR file first.</span>');
     return;
   }
 
@@ -354,55 +616,55 @@ function generate() {
     'Customer.NotifyBySMS','Customer.NotifyByEmail','Customer.NotifyByTelephone'
   ];
 
-  const groups = groupByDate(parsedLines);
+  const groups = groupByDate(lines);
   const data   = [];
 
-  for (const [dateISO, lines] of Object.entries(groups)) {
+  for (const [dateISO, grpLines] of Object.entries(groups)) {
     const orderNo = orderNoFor(prefix, dateISO);
     const comment = [
-      prefix, mtrMeta.requestDate ? 'Requested ' + mtrMeta.requestDate : '',
-      mtrMeta.package, 'Delivery ' + isoToDisplay(dateISO)
+      prefix,
+      mtrMeta.requestDate ? 'Requested ' + mtrMeta.requestDate : '',
+      mtrMeta.package,
+      'Delivery ' + (isoToDisplay(dateISO) || dateISO)
     ].filter(Boolean).join(' · ');
 
-    lines.forEach((l, idx) => {
+    grpLines.forEach((l, idx) => {
       const row = new Array(hdrs.length).fill('');
-      row[0]  = custCode;                      // CustomerNumber
-      row[1]  = dateISO;                       // DeliveryDate
-      row[4]  = orderNo;                       // OrderNo
-      row[5]  = l.artNo;                       // ArticleNumber
-      row[6]  = l.artName;                     // ArticleName
-      row[8]  = l.qty;                         // NumberOfItems
-      row[9]  = idx === 0 ? comment : '';      // OrderComment (first row per order)
-      row[10] = [l.loc, l.truck].filter(Boolean).join(' | '); // OrderRowComment
-      row[14] = 'delivery';                    // WayOfDelivery
-      row[18] = idx === 0 ? custName : '';     // Customer.Name
+      row[0]  = custCode;
+      row[1]  = dateISO;
+      row[4]  = orderNo;
+      row[5]  = l.artNo;
+      row[6]  = l.artName;
+      row[8]  = l.qty;
+      row[9]  = idx === 0 ? comment : '';
+      row[10] = [l.loc, l.truck].filter(Boolean).join(' | ');
+      row[14] = 'delivery';
+      row[18] = idx === 0 ? custName : '';
       data.push(row);
     });
   }
 
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([hdrs, ...data]);
+  const wb    = XLSX.utils.book_new();
+  const ws    = XLSX.utils.aoa_to_sheet([hdrs, ...data]);
   XLSX.utils.book_append_sheet(wb, ws, 'Data');
 
-  // Filename: MTR_<pkgshort>_order_import.xlsx
   const pkgShort = packageShort(mtrMeta.package) || prefix.replace(/^MTR-?/i,'') || 'export';
   const fname    = `MTR_${pkgShort.replace(/[^A-Za-z0-9_-]/g,'_')}_order_import.xlsx`;
   XLSX.writeFile(wb, fname);
 
-  const totalQty  = parsedLines.reduce((s, l) => s + l.qty, 0);
+  const totalQty  = lines.reduce((s, l) => s + l.qty, 0);
   const dateCount = Object.keys(groups).length;
   setStatus('gen-status', `
     <div class="ok-box">
       ✓ Generated <b>${esc(fname)}</b> — ${data.length} row(s), ${totalQty} total items, ${dateCount} order${dateCount>1?'s':''}.<br>
       Import via <b>Ongoing WMS → Order → Import → Choose File</b><br>
       <span style="color:var(--muted)">Goods owner: SPARK - NEL (ID 93) · Warehouse: SPARK_NE_Link ThomasTown (WH 46)</span>
-    </div>`, '');
+    </div>`);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function excelDateToISO(serial) {
   if (!serial || isNaN(serial)) return '';
-  // Excel serial → JS date (Dec 30 1899 epoch, accounts for Excel 1900 leap-year bug)
   const d = new Date(Math.round((serial - 25569) * 86400000));
   return d.toISOString().slice(0, 10);
 }
@@ -413,14 +675,39 @@ function isoToDisplay(iso) {
   return `${d}/${m}/${y}`;
 }
 
+function displayToISO(disp) {
+  if (!disp) return '';
+  const parts = disp.trim().split(/[\/\-\.]/);
+  if (parts.length === 3 && parts[2] && parts[2].length === 4) {
+    const [d, m, y] = parts;
+    return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  }
+  return '';
+}
+
+function parseDateStr(str) {
+  if (!str) return '';
+  // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY
+  const m1 = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (m1) {
+    const [, d, mo, y] = m1;
+    const year = y.length === 2 ? '20' + y : y;
+    return `${year}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  }
+  // Already ISO
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  // Excel serial
+  const serial = parseFloat(str);
+  if (serial > 40000 && serial < 60000) return excelDateToISO(serial);
+  return '';
+}
+
 function groupByDate(lines) {
-  // Groups lines by dateISO, preserving insertion order; dates sorted ascending
   const map = {};
   for (const l of lines) {
     const key = l.dateISO || '(no date)';
     (map[key] = map[key] || []).push(l);
   }
-  // Sort by date key
   return Object.fromEntries(Object.entries(map).sort(([a], [b]) => a.localeCompare(b)));
 }
 
@@ -432,8 +719,6 @@ function orderNoFor(prefix, dateISO) {
 
 function packageShort(pkg) {
   if (!pkg) return '';
-  // "S-MEI-2514 & 2480 / MAXIM / CULVERT" → "S-MEI-2514-2480"
-  // Take everything up to the first slash (or whole string), clean special chars
   let s = pkg.split('/')[0].trim();
   s = s.replace(/\s*&\s*/g, '-').replace(/\s+/g, '-').replace(/[^A-Za-z0-9_-]/g, '');
   return s.replace(/-+$/, '');
